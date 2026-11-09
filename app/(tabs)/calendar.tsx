@@ -2,48 +2,28 @@ import { useCallback, useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 
-import { calculateCycleStatistics, getLogsByDateRange } from '@/lib/database';
+import { getCalendarPhaseSummary } from '@/lib/database';
 
 const WEEKDAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-const PREDICTED_PERIOD_LENGTH = 5;
-const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 
 const toIsoDate = (date: Date) => date.toISOString().slice(0, 10);
-const addDays = (date: Date, days: number) => new Date(date.getTime() + days * ONE_DAY_MS);
 
 export default function CalendarScreen() {
   const [displayDate, setDisplayDate] = useState(new Date());
   const [periodDays, setPeriodDays] = useState<Set<string>>(new Set());
-  const [currentCycleWindow, setCurrentCycleWindow] = useState<Set<string>>(new Set());
-  const [predictedDays, setPredictedDays] = useState<Set<string>>(new Set());
+  const [fertileDays, setFertileDays] = useState<Set<string>>(new Set());
+  const [ovulationDays, setOvulationDays] = useState<Set<string>>(new Set());
+  const [safeDays, setSafeDays] = useState<Set<string>>(new Set());
 
   const loadMonthData = useCallback(async (targetDate: Date) => {
     const monthStart = new Date(targetDate.getFullYear(), targetDate.getMonth(), 1);
     const monthEnd = new Date(targetDate.getFullYear(), targetDate.getMonth() + 1, 0);
-    const [logs, stats] = await Promise.all([
-      getLogsByDateRange(toIsoDate(monthStart), toIsoDate(monthEnd)),
-      calculateCycleStatistics(),
-    ]);
+    const summary = await getCalendarPhaseSummary(toIsoDate(monthStart), toIsoDate(monthEnd));
 
-    setPeriodDays(new Set(logs.filter((log) => log.flowLevel !== 'none').map((log) => log.date)));
-
-    const cycleWindow = new Set<string>();
-    if (stats.currentCycleStart) {
-      const start = new Date(stats.currentCycleStart);
-      for (let i = 0; i < stats.averageCycleLength; i += 1) {
-        cycleWindow.add(toIsoDate(addDays(start, i)));
-      }
-    }
-    setCurrentCycleWindow(cycleWindow);
-
-    const predictedWindow = new Set<string>();
-    stats.predictedPeriodStarts.forEach((dateString) => {
-      const start = new Date(dateString);
-      for (let i = 0; i < PREDICTED_PERIOD_LENGTH; i += 1) {
-        predictedWindow.add(toIsoDate(addDays(start, i)));
-      }
-    });
-    setPredictedDays(predictedWindow);
+    setPeriodDays(new Set(summary.periodDays));
+    setFertileDays(new Set(summary.fertileDays));
+    setOvulationDays(new Set(summary.ovulationDays));
+    setSafeDays(new Set(summary.safeDays));
   }, []);
 
   useFocusEffect(
@@ -100,19 +80,23 @@ export default function CalendarScreen() {
 
             const dateKey = toIsoDate(day);
             const isPeriodDay = periodDays.has(dateKey);
-            const isCurrentCycleDay = currentCycleWindow.has(dateKey);
-            const isPredictedDay = predictedDays.has(dateKey);
+            const isFertileDay = fertileDays.has(dateKey);
+            const isOvulationDay = ovulationDays.has(dateKey);
+            const isSafeDay = safeDays.has(dateKey);
 
             return (
               <View
                 key={dateKey}
                 style={[
                   styles.dayCell,
-                  isCurrentCycleDay && styles.currentCycleDay,
-                  isPredictedDay && styles.predictedDay,
+                  isSafeDay && styles.safeDay,
+                  isFertileDay && styles.fertileDay,
+                  isOvulationDay && styles.ovulationDay,
                   isPeriodDay && styles.periodDay,
                 ]}>
-                <Text style={[styles.dayNumber, isPeriodDay && styles.periodDayText]}>{day.getDate()}</Text>
+                <Text style={[styles.dayNumber, (isPeriodDay || isOvulationDay) && styles.accentDayText]}>
+                  {day.getDate()}
+                </Text>
               </View>
             );
           })}
@@ -120,18 +104,19 @@ export default function CalendarScreen() {
       </View>
 
       <View style={styles.legend}>
-        <Legend color="#E86B7B" label="Logged period days" />
-        <Legend color="#F4E2E5" label="Current cycle window" />
-        <Legend color="#F6C6CF" label="Predicted periods" border />
+        <Legend color="#E86B7B" label="Period days" />
+        <Legend color="#A58BEE" label="Fertile window" />
+        <Legend color="#6D4FC2" label="Ovulation day" />
+        <Legend color="#BFE8C9" label="Safe days / low-risk window" />
       </View>
     </ScrollView>
   );
 }
 
-function Legend({ color, label, border = false }: { color: string; label: string; border?: boolean }) {
+function Legend({ color, label }: { color: string; label: string }) {
   return (
     <View style={styles.legendItem}>
-      <View style={[styles.legendSwatch, { backgroundColor: color }, border && styles.legendSwatchBorder]} />
+      <View style={[styles.legendSwatch, { backgroundColor: color }]} />
       <Text style={styles.legendText}>{label}</Text>
     </View>
   );
@@ -200,17 +185,19 @@ const styles = StyleSheet.create({
     color: '#5D4449',
     fontSize: 14,
   },
-  currentCycleDay: {
-    backgroundColor: '#F4E2E5',
+  safeDay: {
+    backgroundColor: '#BFE8C9',
   },
-  predictedDay: {
-    borderWidth: 1,
-    borderColor: '#F6C6CF',
+  fertileDay: {
+    backgroundColor: '#DCD3F8',
+  },
+  ovulationDay: {
+    backgroundColor: '#6D4FC2',
   },
   periodDay: {
     backgroundColor: '#E86B7B',
   },
-  periodDayText: {
+  accentDayText: {
     color: '#FFFFFF',
     fontWeight: '700',
   },
@@ -232,10 +219,6 @@ const styles = StyleSheet.create({
     width: 12,
     height: 12,
     borderRadius: 999,
-  },
-  legendSwatchBorder: {
-    borderWidth: 1,
-    borderColor: '#EAAAB5',
   },
   legendText: {
     color: '#684A51',

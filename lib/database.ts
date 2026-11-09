@@ -25,8 +25,16 @@ export type CycleStatistics = {
   daysUntilNextPeriod: number | null;
 };
 
+export type CalendarPhaseSummary = {
+  periodDays: string[];
+  fertileDays: string[];
+  ovulationDays: string[];
+  safeDays: string[];
+};
+
 const DB_NAME = 'pace.db';
 const DEFAULT_CYCLE_LENGTH = 28;
+const DEFAULT_PERIOD_LENGTH = 5;
 const PREDICTION_WINDOW = 3;
 const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -85,6 +93,12 @@ const ensureInitialized = async () => {
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
+    CREATE TABLE IF NOT EXISTS user_profile (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      name TEXT NOT NULL DEFAULT '',
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    INSERT OR IGNORE INTO user_profile (id, name) VALUES (1, '');
   `);
     })();
   }
@@ -154,6 +168,28 @@ export const getLogForDate = async (date: string): Promise<DailyLog | null> => {
   );
 
   return row ? mapRowToLog(row) : null;
+};
+
+export const getUserName = async (): Promise<string | null> => {
+  await ensureInitialized();
+  const db = await getDb();
+  const row = await db.getFirstAsync<{ name: string }>(`SELECT name FROM user_profile WHERE id = 1;`);
+  const trimmed = row?.name?.trim() ?? '';
+  return trimmed.length ? trimmed : null;
+};
+
+export const saveUserName = async (name: string) => {
+  await ensureInitialized();
+  const db = await getDb();
+  const trimmedName = name.trim();
+  await db.runAsync(
+    `INSERT INTO user_profile (id, name, updated_at)
+     VALUES (1, ?, CURRENT_TIMESTAMP)
+     ON CONFLICT(id) DO UPDATE SET
+      name = excluded.name,
+      updated_at = CURRENT_TIMESTAMP;`,
+    trimmedName
+  );
 };
 
 const getPeriodDayDates = (logs: DailyLog[]) =>
@@ -251,6 +287,95 @@ export const calculateCycleStatistics = async (): Promise<CycleStatistics> => {
   };
 };
 
+export const getCalendarPhaseSummary = async (startDate: string, endDate: string): Promise<CalendarPhaseSummary> => {
+  const [logs, stats] = await Promise.all([getLogsByDateRange(startDate, endDate), calculateCycleStatistics()]);
+
+  const rangeStart = new Date(startDate);
+  const rangeEnd = new Date(endDate);
+  const periodLoggedDays = new Set(logs.filter((log) => log.flowLevel !== 'none').map((log) => log.date));
+
+  const periodDays = new Set<string>(periodLoggedDays);
+  const fertileDays = new Set<string>();
+  const ovulationDays = new Set<string>();
+  const safeDays = new Set<string>();
+
+  if (!stats.cycleStarts.length) {
+    return {
+      periodDays: [],
+      fertileDays: [],
+      ovulationDays: [],
+      safeDays: [],
+    };
+  }
+
+  const cycleStartDates = stats.cycleStarts.map((date) => new Date(date)).sort((a, b) => a.getTime() - b.getTime());
+  const cycleLength = Math.max(21, stats.averageCycleLength);
+  const extensionStart = addDays(rangeStart, -cycleLength);
+  const extensionEnd = addDays(rangeEnd, cycleLength);
+
+  while (cycleStartDates[0].getTime() > extensionStart.getTime()) {
+    cycleStartDates.unshift(addDays(cycleStartDates[0], -cycleLength));
+  }
+  while (cycleStartDates[cycleStartDates.length - 1].getTime() < extensionEnd.getTime()) {
+    cycleStartDates.push(addDays(cycleStartDates[cycleStartDates.length - 1], cycleLength));
+  }
+
+  for (const cycleStart of cycleStartDates) {
+    for (let dayOffset = 0; dayOffset < DEFAULT_PERIOD_LENGTH; dayOffset += 1) {
+      const date = addDays(cycleStart, dayOffset);
+      if (date.getTime() >= rangeStart.getTime() && date.getTime() <= rangeEnd.getTime()) {
+        periodDays.add(toIsoDate(date));
+      }
+    }
+  }
+
+  const ovulationCycleDay = Math.max(1, cycleLength - 14);
+  const fertileStartCycleDay = Math.max(1, ovulationCycleDay - 5);
+  const fertileEndCycleDay = Math.min(cycleLength, ovulationCycleDay + 1);
+
+  for (let date = new Date(rangeStart); date.getTime() <= rangeEnd.getTime(); date = addDays(date, 1)) {
+    const dateKey = toIsoDate(date);
+
+    let cycleStartForDay = cycleStartDates[0];
+    for (let i = 1; i < cycleStartDates.length; i += 1) {
+      if (cycleStartDates[i].getTime() <= date.getTime()) {
+        cycleStartForDay = cycleStartDates[i];
+      } else {
+        break;
+      }
+    }
+
+    const cycleDay = diffDays(cycleStartForDay, date) + 1;
+    const isOvulation = cycleDay === ovulationCycleDay;
+    const isFertile = cycleDay >= fertileStartCycleDay && cycleDay <= fertileEndCycleDay;
+    const isPeriod = periodDays.has(dateKey);
+
+    if (isPeriod) {
+      continue;
+    }
+
+    if (isOvulation) {
+      ovulationDays.add(dateKey);
+      fertileDays.add(dateKey);
+      continue;
+    }
+
+    if (isFertile) {
+      fertileDays.add(dateKey);
+      continue;
+    }
+
+    safeDays.add(dateKey);
+  }
+
+  return {
+    periodDays: [...periodDays].sort(),
+    fertileDays: [...fertileDays].sort(),
+    ovulationDays: [...ovulationDays].sort(),
+    safeDays: [...safeDays].sort(),
+  };
+};
+
 export const exportLogsAsJson = async (): Promise<string> => {
   await ensureInitialized();
   const db = await getDb();
@@ -269,8 +394,13 @@ export const exportLogsAsJson = async (): Promise<string> => {
      ORDER BY date ASC;`
   );
 
+  const name = await getUserName();
+
   const payload = {
     exportedAt: new Date().toISOString(),
+    profile: {
+      name,
+    },
     logs: rows.map((row) => ({
       ...row,
       symptoms: parseSymptoms(row.symptoms),

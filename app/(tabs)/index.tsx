@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Alert, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 
 import {
@@ -8,6 +8,8 @@ import {
   Symptom,
   calculateCycleStatistics,
   getLogForDate,
+  getUserName,
+  saveUserName,
   upsertDailyLog,
 } from '@/lib/database';
 
@@ -24,10 +26,13 @@ export default function HomeScreen() {
   const [notes, setNotes] = useState('');
   const [cycleDay, setCycleDay] = useState<number | null>(null);
   const [daysUntilNextPeriod, setDaysUntilNextPeriod] = useState<number | null>(null);
+  const [userName, setUserName] = useState<string | null>(null);
+  const [nameInput, setNameInput] = useState('');
+  const [showNameModal, setShowNameModal] = useState(false);
   const [saving, setSaving] = useState(false);
 
   const load = useCallback(async () => {
-    const [existingLog, stats] = await Promise.all([getLogForDate(today), calculateCycleStatistics()]);
+    const [existingLog, stats, savedName] = await Promise.all([getLogForDate(today), calculateCycleStatistics(), getUserName()]);
     if (existingLog) {
       setFlowLevel(existingLog.flowLevel);
       setSelectedSymptoms(existingLog.symptoms);
@@ -36,6 +41,8 @@ export default function HomeScreen() {
     }
     setCycleDay(stats.currentCycleDay);
     setDaysUntilNextPeriod(stats.daysUntilNextPeriod);
+    setUserName(savedName);
+    setShowNameModal(!savedName);
   }, []);
 
   useFocusEffect(
@@ -79,73 +86,112 @@ export default function HomeScreen() {
     }
   };
 
+  const onSaveName = async () => {
+    const trimmedName = nameInput.trim();
+    if (!trimmedName) {
+      return;
+    }
+    await saveUserName(trimmedName);
+    setUserName(trimmedName);
+    setShowNameModal(false);
+    setNameInput('');
+  };
+
   return (
-    <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>Current cycle</Text>
-        <Text style={styles.cycleDay}>{cycleText}</Text>
-        <Text style={styles.countdown}>{countdownText}</Text>
-      </View>
-
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Symptoms</Text>
-        <View style={styles.chipGrid}>
-          {symptoms.map((symptom) => (
-            <Pressable
-              key={symptom}
-              onPress={() => toggleSymptom(symptom)}
-              style={[styles.chip, selectedSymptoms.includes(symptom) && styles.chipSelected]}>
-              <Text style={[styles.chipText, selectedSymptoms.includes(symptom) && styles.chipTextSelected]}>
-                {symptom}
-              </Text>
-            </Pressable>
-          ))}
+    <>
+      <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
+        <View style={styles.welcomeRow}>
+          <Text style={styles.welcomeText}>Hi, {userName ?? 'there'}</Text>
         </View>
-      </View>
 
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Flow intensity</Text>
-        <View style={styles.chipGrid}>
-          {flowOptions.map((option) => (
-            <Pressable
-              key={option}
-              onPress={() => setFlowLevel(option)}
-              style={[styles.chip, flowLevel === option && styles.chipSelected]}>
-              <Text style={[styles.chipText, flowLevel === option && styles.chipTextSelected]}>{option}</Text>
-            </Pressable>
-          ))}
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Current cycle</Text>
+          <Text style={styles.cycleDay}>{cycleText}</Text>
+          <Text style={styles.countdown}>{countdownText}</Text>
         </View>
-      </View>
 
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Mood</Text>
-        <View style={styles.chipGrid}>
-          {moods.map((option) => (
-            <Pressable
-              key={option}
-              onPress={() => setMood(option)}
-              style={[styles.chip, mood === option && styles.chipSelected]}>
-              <Text style={[styles.chipText, mood === option && styles.chipTextSelected]}>{option}</Text>
-            </Pressable>
-          ))}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Symptoms</Text>
+          <View style={styles.chipGrid}>
+            {symptoms.map((symptom) => (
+              <Pressable
+                key={symptom}
+                onPress={() => toggleSymptom(symptom)}
+                style={[styles.chip, selectedSymptoms.includes(symptom) && styles.chipSelected]}>
+                <Text style={[styles.chipText, selectedSymptoms.includes(symptom) && styles.chipTextSelected]}>
+                  {symptom}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
         </View>
-      </View>
 
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Notes</Text>
-        <TextInput
-          value={notes}
-          onChangeText={setNotes}
-          placeholder="How are you feeling today?"
-          multiline
-          style={styles.notesInput}
-        />
-      </View>
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Flow intensity</Text>
+          <View style={styles.chipGrid}>
+            {flowOptions.map((option) => (
+              <Pressable
+                key={option}
+                onPress={() => setFlowLevel(option)}
+                style={[styles.chip, flowLevel === option && styles.chipSelected]}>
+                <Text style={[styles.chipText, flowLevel === option && styles.chipTextSelected]}>{option}</Text>
+              </Pressable>
+            ))}
+          </View>
+        </View>
 
-      <Pressable onPress={onSave} disabled={saving} style={[styles.saveButton, saving && styles.saveButtonDisabled]}>
-        <Text style={styles.saveButtonText}>{saving ? 'Saving…' : 'Save today’s log'}</Text>
-      </Pressable>
-    </ScrollView>
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Mood</Text>
+          <View style={styles.chipGrid}>
+            {moods.map((option) => (
+              <Pressable
+                key={option}
+                onPress={() => setMood(option)}
+                style={[styles.chip, mood === option && styles.chipSelected]}>
+                <Text style={[styles.chipText, mood === option && styles.chipTextSelected]}>{option}</Text>
+              </Pressable>
+            ))}
+          </View>
+        </View>
+
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Notes</Text>
+          <TextInput
+            value={notes}
+            onChangeText={setNotes}
+            placeholder="How are you feeling today?"
+            multiline
+            style={styles.notesInput}
+          />
+        </View>
+
+        <Pressable onPress={onSave} disabled={saving} style={[styles.saveButton, saving && styles.saveButtonDisabled]}>
+          <Text style={styles.saveButtonText}>{saving ? 'Saving…' : 'Save today’s log'}</Text>
+        </Pressable>
+      </ScrollView>
+
+      <Modal animationType="fade" transparent visible={showNameModal}>
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Welcome to Pace</Text>
+            <Text style={styles.modalSubtitle}>What name should we call you?</Text>
+            <TextInput
+              value={nameInput}
+              onChangeText={setNameInput}
+              placeholder="Enter your name"
+              style={styles.modalInput}
+              autoCapitalize="words"
+            />
+            <Pressable
+              onPress={onSaveName}
+              disabled={!nameInput.trim()}
+              style={[styles.modalButton, !nameInput.trim() && styles.modalButtonDisabled]}>
+              <Text style={styles.modalButtonText}>Save name</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
+    </>
   );
 }
 
@@ -157,6 +203,14 @@ const styles = StyleSheet.create({
   content: {
     padding: 16,
     gap: 16,
+  },
+  welcomeRow: {
+    alignItems: 'flex-start',
+  },
+  welcomeText: {
+    fontSize: 28,
+    fontWeight: '700',
+    color: '#3B2C2F',
   },
   card: {
     backgroundColor: '#FFECEF',
@@ -241,5 +295,51 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontWeight: '700',
     fontSize: 16,
+  },
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(46, 30, 32, 0.35)',
+    justifyContent: 'center',
+    padding: 20,
+  },
+  modalCard: {
+    backgroundColor: '#FFF9F7',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#F1DBDF',
+    padding: 18,
+    gap: 10,
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#3B2C2F',
+  },
+  modalSubtitle: {
+    fontSize: 14,
+    color: '#6D5258',
+  },
+  modalInput: {
+    borderWidth: 1,
+    borderColor: '#EBCED4',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    backgroundColor: '#FFFFFF',
+    color: '#3F3235',
+  },
+  modalButton: {
+    marginTop: 6,
+    backgroundColor: '#E86B7B',
+    borderRadius: 10,
+    alignItems: 'center',
+    paddingVertical: 12,
+  },
+  modalButtonDisabled: {
+    opacity: 0.6,
+  },
+  modalButtonText: {
+    color: '#FFFFFF',
+    fontWeight: '700',
   },
 });

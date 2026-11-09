@@ -60,6 +60,25 @@ export default function InsightsScreen() {
           <Text style={styles.exportButtonText}>{exporting ? 'Preparing export…' : 'Export Data'}</Text>
         </Pressable>
       </View>
+
+      <View style={styles.card}>
+        <Text style={styles.cardTitle}>Cramp relief guide</Text>
+        <Text style={styles.guideSectionTitle}>Medication options</Text>
+        <Text style={styles.guideText}>
+          Ibuprofen (Brufen/Nurofen) and Paracetamol can help with moderate-to-severe period pain when used exactly as
+          directed on the label.
+        </Text>
+        <Text style={styles.disclaimerText}>
+          Important: This app is not medical advice. Follow package instructions, avoid doses above label guidance, and
+          talk to a clinician or pharmacist if pain is severe, persistent, or you have other health conditions.
+        </Text>
+
+        <Text style={[styles.guideSectionTitle, styles.guideSpacing]}>Kenyan local comfort ideas</Text>
+        <Text style={styles.guideText}>• Fresh Ginger Tea (Chai ya Tangawizi) or chamomile tea for calming cramps.</Text>
+        <Text style={styles.guideText}>• Bananas (Ndizi) for potassium and magnesium support.</Text>
+        <Text style={styles.guideText}>• Freshly cooked Sukuma Wiki or spinach for iron and magnesium.</Text>
+        <Text style={styles.guideText}>• Warm water or fresh juices to reduce dehydration-linked cramping.</Text>
+      </View>
     </ScrollView>
   );
 }
@@ -123,5 +142,24 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontWeight: '700',
     fontSize: 15,
+  },
+  guideSectionTitle: {
+    color: '#4E383D',
+    fontWeight: '700',
+    marginBottom: 4,
+  },
+  guideSpacing: {
+    marginTop: 10,
+  },
+  guideText: {
+    color: '#674C52',
+    lineHeight: 20,
+    marginBottom: 4,
+  },
+  disclaimerText: {
+    marginTop: 8,
+    color: '#7B5960',
+    lineHeight: 18,
+    fontSize: 12,
   },
 });
